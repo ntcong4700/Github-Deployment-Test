@@ -1,4 +1,4 @@
-name: Deploy to Ubuntu Server
+name: Deploy FastAPI
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
-          ping: ${{ secrets.SERVER_HOST }}
+          ping: ${{ secrets.SERVER_IP }}
 
       - name: Configure SSH
         run: |
@@ -31,26 +31,34 @@ jobs:
           printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
-          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -H "${{ secrets.SERVER_IP }}" >> ~/.ssh/known_hosts
 
-      - name: Copy application to server
+      - name: Test SSH connection
         run: |
+          ssh "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}" \
+            "echo 'SSH connection successful'"
+
+      - name: Copy project to server
+        run: |
+          ssh "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}" \
+            "mkdir -p ~/apps/fastapi"
+
           rsync -az --delete \
             --exclude ".git" \
             --exclude ".github" \
             ./ \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/${{ secrets.SERVER_USER }}/apps/fastapi/"
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:~/apps/fastapi/"
 
-      - name: Deploy Docker containers
+      - name: Deploy Docker
         run: |
-          ssh "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'EOF'
+          ssh "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}" << 'EOF'
             set -e
 
             cd ~/apps/fastapi
 
             docker compose up -d --build --remove-orphans
 
-            docker image prune -f
+            docker ps
 
-            echo "Deployment successful"
+            echo "Deploy successful"
           EOF
