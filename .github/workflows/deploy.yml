@@ -1,29 +1,56 @@
-name: Deploy via Tailscale
+name: Deploy to Ubuntu Server
+
 on:
   push:
-    branches: [ main ] # Chạy khi push vào branch main
+    branches:
+      - main
+
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Connect to Tailscale
-        uses: tailscale/github-action@v2
+        uses: tailscale/github-action@v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
+          ping: ${{ secrets.SERVER_HOST }}
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: root # Hoặc user của bạn trên server
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            echo "Đã kết nối thành công tới server!"
-            cd /path/to/your/project
-            git pull origin main
-            # Thêm các lệnh restart server của bạn ở đây
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Copy application to server
+        run: |
+          rsync -az --delete \
+            --exclude ".git" \
+            --exclude ".github" \
+            ./ \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/${{ secrets.SERVER_USER }}/apps/fastapi/"
+
+      - name: Deploy Docker containers
+        run: |
+          ssh "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'EOF'
+            set -e
+
+            cd ~/apps/fastapi
+
+            docker compose up -d --build --remove-orphans
+
+            docker image prune -f
+
+            echo "Deployment successful"
+          EOF
